@@ -16,6 +16,8 @@ One row per SKU.
 | unit_cost | NUMERIC(10,2) | | Current purchase cost |
 | unit_price | NUMERIC(10,2) | | Current list price |
 
+Categories: Brakes, Suspension, Filters, Oils & Lubricants, Batteries & Electrical, Cooling, Lighting, Hand Tools, Power Tools, Fasteners.
+
 ### suppliers
 One row per supplier.
 
@@ -71,3 +73,46 @@ One row per invoice (one per sale order).
 | amount | NUMERIC(12,2) | | Sum of qty × unit_price of its lines |
 | paid_date | DATE | | NULL while unpaid |
 | updated_at | TIMESTAMP | | Last change (used for incremental extraction) |
+
+### inventory_snapshots
+One row per date × SKU × warehouse (end-of-day stock).
+
+| Column | Type | Key | Description |
+|---|---|---|---|
+| snapshot_date | DATE | PK | |
+| sku | VARCHAR(10) | PK, FK → products | |
+| warehouse_id | INT | PK, FK → warehouses | |
+| on_hand_qty | INT | | Units on hand at end of day (≥ 0) |
+
+### purchase_orders
+One row per PO line (one SKU, delivered to one warehouse).
+
+| Column | Type | Key | Description |
+|---|---|---|---|
+| po_line_id | INT | PK | |
+| po_id | INT | | Purchase order number (groups lines) |
+| supplier_id | INT | FK → suppliers | |
+| sku | VARCHAR(10) | FK → products | |
+| warehouse_id | INT | FK → warehouses | Destination warehouse |
+| qty_ordered | INT | | |
+| unit_cost | NUMERIC(10,2) | | Cost agreed on this PO |
+| order_date | DATE | | |
+| promised_date | DATE | | order_date + supplier promised lead time |
+| received_date | DATE | | NULL while open |
+| qty_received | INT | | NULL while open; may be < qty_ordered |
+| updated_at | TIMESTAMP | | Last change (used for incremental extraction) |
+
+## Relationships
+- products.supplier_id → suppliers.supplier_id
+- sales.sku → products.sku; sales.warehouse_id → warehouses; sales.customer_id → customers; sales.invoice_id → invoices
+- invoices.customer_id → customers.customer_id
+- inventory_snapshots.sku → products; inventory_snapshots.warehouse_id → warehouses
+- purchase_orders.supplier_id → suppliers; purchase_orders.sku → products; purchase_orders.warehouse_id → warehouses
+
+## Consistency rules (enforced by the generator)
+1. on_hand(today) = on_hand(yesterday) + qty_received(today) − qty_sold(today), per SKU and warehouse.
+2. on_hand_qty is never negative; demand above stock is lost and not recorded in sales.
+3. received_date ≥ order_date; qty_received ≤ qty_ordered.
+4. Late delivery = received_date > promised_date (some suppliers are systematically late).
+5. invoices.amount = Σ(qty × unit_price) of its sales lines.
+6. due_date = issue_date + customers.credit_days; some customers pay after due_date.
